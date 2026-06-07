@@ -16,6 +16,7 @@ app/release/
 
 *.iml
 .idea/
+.claude/
 misc.xml
 deploymentTargetDropDown.xml
 render.experimental.xml

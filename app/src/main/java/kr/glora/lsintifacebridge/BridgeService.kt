@@ -14,7 +14,9 @@ import android.bluetooth.le.AdvertisingSetParameters
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import okhttp3.OkHttpClient
@@ -34,6 +36,11 @@ class BridgeService : Service() {
     private var webSocketStatus = "disconnected"
     private var bleStatus = "idle"
 
+    // pulsed, waves and so on... added!
+    private val patternHandler = Handler(Looper.getMainLooper())
+    private var patternRunnable: Runnable? = null
+    private var activePattern: String? = null
+
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
@@ -51,7 +58,12 @@ class BridgeService : Service() {
                 stopSelf()
             }
             ACTION_TEST_LEVEL -> {
+                stopPattern()
                 advertiseLevel(intent.getIntExtra(EXTRA_LEVEL, 0))
+            }
+            ACTION_TEST_PATTERN -> {
+                val pattern = intent.getStringExtra(EXTRA_PATTERN)
+                if (pattern.isNullOrBlank()) stopPattern() else startPattern(pattern)
             }
         }
         return START_STICKY
@@ -116,6 +128,9 @@ class BridgeService : Service() {
             command.startsWith("Status:1;") -> "2;"
             command.startsWith("AutoSwitch:") -> "OK;"
             command.startsWith("Vibrate:") -> {
+                // A real command from Intiface should win over a locally running test
+                // pattern, otherwise the pattern loop would immediately overwrite it.
+                stopPattern()
                 advertiseLevel(parseVibrateLevel(command))
                 "OK;"
             }
@@ -197,10 +212,49 @@ class BridgeService : Service() {
     }
 
     private fun shutdown() {
+        stopPattern()
         webSocket?.close(1000, "service stopped")
         webSocket = null
         stopAdvertising()
         publish("Bridge stopped", webSocketStatus = "disconnected")
+    }
+
+    /**
+     * PR proposal: replays [PATTERNS] entries as a looping sequence of advertiseLevel()
+     * calls, each held for its given duration. This is purely a local effect - nothing
+     * is sent back to Intiface - so it works the same whether or not a session is active,
+     * mirroring how the existing test slider drives the BLE side directly.
+     */
+    private fun startPattern(name: String) {
+        val steps = PATTERNS[name]
+        if (steps == null) {
+            publish("[Pattern] Unknown pattern '$name'")
+            return
+        }
+
+        stopPattern()
+        activePattern = name
+        publish("[Pattern] Starting '$name'")
+
+        var stepIndex = 0
+        val runnable = object : Runnable {
+            override fun run() {
+                val (level, holdMs) = steps[stepIndex % steps.size]
+                stepIndex++
+                advertiseLevel(level)
+                patternHandler.postDelayed(this, holdMs)
+            }
+        }
+        patternRunnable = runnable
+        patternHandler.post(runnable)
+    }
+
+    private fun stopPattern() {
+        val runnable = patternRunnable ?: return
+        patternHandler.removeCallbacks(runnable)
+        patternRunnable = null
+        publish("[Pattern] Stopped '$activePattern'")
+        activePattern = null
     }
 
     private fun hasBluetoothPermissions(): Boolean =
@@ -309,7 +363,14 @@ class BridgeService : Service() {
     private fun lovenseLevelToIndex(level: Int): Int {
         val clamped = level.coerceIn(0, 20)
         if (clamped == 0) return 0
-        return (((clamped / 20.0) * 8.0 + 0.5).toInt() + 1).coerceIn(1, 9)
+        // PR note: the previous "scale by 8, +0.5, floor, +1" formula squeezed the 20
+        // non-zero Lovense levels (1..20) into the 9 BLE channels unevenly - level 1
+        // alone produced index 1, while indexes 3, 5 and 7 each absorbed 3 input levels.
+        // That made the gentlest, most frequently used setting the least adjustable one.
+        // Plain integer division spreads the 20 inputs over the 9 outputs as evenly as
+        // possible (two buckets of 3 levels, seven buckets of 2) and keeps the result
+        // within 1..9 by construction, so the trailing coerceIn can be dropped too.
+        return (((clamped - 1) * 9) / 20) + 1
     }
 
     private fun manufacturerBody(index: Int): ByteArray {
@@ -334,6 +395,7 @@ class BridgeService : Service() {
         const val ACTION_START = "kr.glora.lsintifacebridge.action.START"
         const val ACTION_STOP = "kr.glora.lsintifacebridge.action.STOP"
         const val ACTION_TEST_LEVEL = "kr.glora.lsintifacebridge.action.TEST_LEVEL"
+        const val ACTION_TEST_PATTERN = "kr.glora.lsintifacebridge.action.TEST_PATTERN"
         const val ACTION_STATUS = "kr.glora.lsintifacebridge.action.STATUS"
 
         const val EXTRA_WS_URL = "ws_url"
@@ -341,6 +403,7 @@ class BridgeService : Service() {
         const val EXTRA_WS_STATUS = "ws_status"
         const val EXTRA_BLE_STATUS = "ble_status"
         const val EXTRA_LEVEL = "level"
+        const val EXTRA_PATTERN = "pattern"
 
         private const val DEFAULT_WS_URL = "ws://192.168.0.2:54817"
         private const val NOTIFICATION_CHANNEL_ID = "bridge_status"
@@ -368,6 +431,19 @@ class BridgeService : Service() {
             0xE70000,
             0xFC0000,
             0xE60000,
+        )
+
+        // PR proposal: preset "fake patterns" - each entry is a list of
+        // (Lovense level 0..20, hold duration in milliseconds) steps that are looped by
+        // startPattern(). These are just suggested starting points and easy to retune
+        // or extend; the names are also what the test UI passes through EXTRA_PATTERN.
+        private val PATTERNS: Map<String, List<Pair<Int, Long>>> = mapOf(
+            "pulse" to listOf(20 to 350L, 0 to 350L),
+            "wave" to listOf(
+                4 to 250L, 8 to 250L, 12 to 250L, 16 to 250L, 20 to 250L,
+                16 to 250L, 12 to 250L, 8 to 250L, 4 to 250L,
+            ),
+            "escalate" to listOf(4 to 600L, 8 to 600L, 12 to 600L, 16 to 600L, 20 to 1200L),
         )
     }
 }

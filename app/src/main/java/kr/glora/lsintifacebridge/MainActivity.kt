@@ -127,6 +127,26 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                         }
+                        // PR proposal: lets you preview the bridge-side "fake patterns"
+                        // (see BridgeService.PATTERNS) the same way the slider above
+                        // previews a single level - purely local, no Intiface needed.
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("Test Patterns")
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(onClick = { triggerPattern("pulse") }) {
+                                    Text("Pulse")
+                                }
+                                Button(onClick = { triggerPattern("wave") }) {
+                                    Text("Wave")
+                                }
+                                Button(onClick = { triggerPattern("escalate") }) {
+                                    Text("Escalate")
+                                }
+                                Button(onClick = { triggerPattern(null) }) {
+                                    Text("Stop")
+                                }
+                            }
+                        }
                         Text("WebSocket: $webSocketStatus")
                         Text("BLE: $bleStatus")
                         Text("Level: $currentLevel")
@@ -184,6 +204,14 @@ class MainActivity : ComponentActivity() {
         val intent = Intent(this, BridgeService::class.java)
             .setAction(BridgeService.ACTION_TEST_LEVEL)
             .putExtra(BridgeService.EXTRA_LEVEL, level)
+        ContextCompat.startForegroundService(this, intent)
+    }
+
+    // PR proposal: pass null to stop whatever pattern is currently looping.
+    private fun triggerPattern(pattern: String?) {
+        val intent = Intent(this, BridgeService::class.java)
+            .setAction(BridgeService.ACTION_TEST_PATTERN)
+        if (pattern != null) intent.putExtra(BridgeService.EXTRA_PATTERN, pattern)
         ContextCompat.startForegroundService(this, intent)
     }
 
