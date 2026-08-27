@@ -44,7 +44,10 @@ class MainActivity : ComponentActivity() {
     private var webSocketStatus by mutableStateOf("disconnected")
     private var bleStatus by mutableStateOf("idle")
     private var currentLevel by mutableIntStateOf(0)
-    private var testLovenseLevel by mutableIntStateOf(10)
+    private var vibeLovenseLevel by mutableIntStateOf(0)
+    private var rotateLovenseLevel by mutableIntStateOf(0)
+    private var testVibeLevel by mutableIntStateOf(10)
+    private var testRotateLevel by mutableIntStateOf(10)
     private var logText by mutableStateOf("")
 
     private val permissions: Array<String>
@@ -71,6 +74,8 @@ class MainActivity : ComponentActivity() {
             webSocketStatus = intent.getStringExtra(BridgeService.EXTRA_WS_STATUS) ?: webSocketStatus
             bleStatus = intent.getStringExtra(BridgeService.EXTRA_BLE_STATUS) ?: bleStatus
             currentLevel = intent.getIntExtra(BridgeService.EXTRA_LEVEL, currentLevel)
+            vibeLovenseLevel = intent.getIntExtra(BridgeService.EXTRA_VIBRATION_LEVEL, vibeLovenseLevel)
+            rotateLovenseLevel = intent.getIntExtra(BridgeService.EXTRA_ROTATION_LEVEL, rotateLovenseLevel)
             intent.getStringExtra(BridgeService.EXTRA_LOG)?.let(::appendLog)
         }
     }
@@ -88,7 +93,7 @@ class MainActivity : ComponentActivity() {
                             .padding(innerPadding)
                             .padding(16.dp)
                             .fillMaxSize(),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         Text("LS Intiface Bridge", style = MaterialTheme.typography.titleLarge)
                         OutlinedTextField(
@@ -110,26 +115,51 @@ class MainActivity : ComponentActivity() {
                                 Text("Stop")
                             }
                         }
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text("Test Lovense Level: $testLovenseLevel")
+
+                        // Vibration Test Control
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text("Test Vibration: $testVibeLevel (0..20)")
                             Slider(
-                                value = testLovenseLevel.toFloat(),
-                                onValueChange = { testLovenseLevel = it.roundToInt() },
+                                value = testVibeLevel.toFloat(),
+                                onValueChange = { testVibeLevel = it.roundToInt() },
                                 valueRange = 0f..20f,
                                 steps = 19,
                             )
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Button(onClick = { testLevel(testLovenseLevel) }) {
-                                    Text("Send")
-                                }
-                                Button(onClick = { testLevel(0) }) {
-                                    Text("Off")
-                                }
+                        }
+
+                        // Rotation Test Control
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text("Test Rotation: $testRotateLevel (0..20)")
+                            Slider(
+                                value = testRotateLevel.toFloat(),
+                                onValueChange = { testRotateLevel = it.roundToInt() },
+                                valueRange = 0f..20f,
+                                steps = 19,
+                            )
+                        }
+
+                        // Action Buttons
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            Button(onClick = { testVibration(testVibeLevel) }) {
+                                Text("Vib")
+                            }
+                            Button(onClick = { testRotation(testRotateLevel) }) {
+                                Text("Rot")
+                            }
+                            Button(onClick = { testBoth(testVibeLevel, testRotateLevel) }) {
+                                Text("Both")
+                            }
+                            Button(onClick = { stopAll() }) {
+                                Text("Off")
                             }
                         }
+
                         Text("WebSocket: $webSocketStatus")
                         Text("BLE: $bleStatus")
-                        Text("Level: $currentLevel")
+                        Text("State: Vib $vibeLovenseLevel / Rot $rotateLovenseLevel (Current L$currentLevel)")
                         Spacer(Modifier.height(4.dp))
                         Text(
                             text = logText,
@@ -180,10 +210,33 @@ class MainActivity : ComponentActivity() {
         appendLog("Bridge service stopping")
     }
 
-    private fun testLevel(level: Int) {
+    private fun testVibration(level: Int) {
         val intent = Intent(this, BridgeService::class.java)
             .setAction(BridgeService.ACTION_TEST_LEVEL)
-            .putExtra(BridgeService.EXTRA_LEVEL, level)
+            .putExtra(BridgeService.EXTRA_VIBRATION_LEVEL, level)
+        ContextCompat.startForegroundService(this, intent)
+    }
+
+    private fun testRotation(level: Int) {
+        val intent = Intent(this, BridgeService::class.java)
+            .setAction(BridgeService.ACTION_TEST_LEVEL)
+            .putExtra(BridgeService.EXTRA_ROTATION_LEVEL, level)
+        ContextCompat.startForegroundService(this, intent)
+    }
+
+    private fun testBoth(vibeLevel: Int, rotateLevel: Int) {
+        val intent = Intent(this, BridgeService::class.java)
+            .setAction(BridgeService.ACTION_TEST_LEVEL)
+            .putExtra(BridgeService.EXTRA_VIBRATION_LEVEL, vibeLevel)
+            .putExtra(BridgeService.EXTRA_ROTATION_LEVEL, rotateLevel)
+        ContextCompat.startForegroundService(this, intent)
+    }
+
+    private fun stopAll() {
+        val intent = Intent(this, BridgeService::class.java)
+            .setAction(BridgeService.ACTION_TEST_LEVEL)
+            .putExtra(BridgeService.EXTRA_VIBRATION_LEVEL, 0)
+            .putExtra(BridgeService.EXTRA_ROTATION_LEVEL, 0)
         ContextCompat.startForegroundService(this, intent)
     }
 
@@ -213,3 +266,4 @@ class MainActivity : ComponentActivity() {
         private const val PREF_WS_URL = "ws_url"
     }
 }
+
